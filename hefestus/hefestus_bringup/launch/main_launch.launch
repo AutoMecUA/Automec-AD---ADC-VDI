@@ -1,6 +1,6 @@
 <launch>
-    <node pkg="pandora_sensing" type="sensing.py" name="sensing" output="screen"/>
-    <node pkg="pandora_perception" type="perception.py" name="perception" output="screen"/>
-    <node pkg="pandora_control" type="control.py" name="control" output="screen"/>
-    <node pkg="pandora_actuation" type="actuation.py" name="actuation" output="screen"/>
+    <node pkg="hefestus_sensing" type="sensing.py" name="sensing" output="screen"/>
+    <node pkg="hefestus_perception" type="perception.py" name="perception" output="screen"/>
+    <node pkg="hefestus_control" type="control.py" name="control" output="screen"/>
+    <node pkg="hefestus_actuation" type="actuation.py" name="actuation" output="screen"/>
 </launch>
