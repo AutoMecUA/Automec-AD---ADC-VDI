@@ -2,6 +2,7 @@
 
 import cv2
 import numpy as np
+from cv_bridge import CvBridge
 
 import rospy
 from std_msgs.msg import String
@@ -16,14 +17,16 @@ def laneDetection_node():
     rate = rospy.Rate(1) # 10hz
 
     while not rospy.is_shutdown():
-        pubState.publish()
+        #pubState.publish()
         rate.sleep()
 
 def callback(data):
-	print(data)
-    #testimage=frame_processor(data)
-	#cv2.namedWindow("image")
-	#cv2.imshow('image', image)
+    bridge = CvBridge()
+    cv_image = bridge.imgmsg_to_cv2(data)
+    testimage=frame_processor(cv_image)
+    cv2.imshow('image', cv_image)
+    pubState = rospy.Publisher('LanePos',Image,queue_size=10)
+    pubState.publish(data=testimage)
 
 def frame_processor(image):
 	"""
