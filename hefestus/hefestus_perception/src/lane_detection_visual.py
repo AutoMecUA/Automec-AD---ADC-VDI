@@ -9,7 +9,7 @@ from std_msgs.msg import String
 from sensor_msgs.msg import Image
 
 def laneDetection_node():
-    rospy.init_node('laneDetection', anonymous=False)
+    rospy.init_node('VisualLaneDetection', anonymous=False)
     rospy.Subscriber("/image", Image, callback)
         
     rate = rospy.Rate(1) # 10hz
@@ -21,6 +21,9 @@ def callback(data):
 	bridge = CvBridge()
 	cv_image = bridge.imgmsg_to_cv2(data,"bgr8")
 	testimage=frame_processor(cv_image)
+	msgimg=bridge.cv2_to_imgmsg(testimage,"bgr8")
+	pubState = rospy.Publisher('LaneImage',Image,queue_size=10)
+	pubState.publish(msgimg)
 
 def frame_processor(image):
 	"""
