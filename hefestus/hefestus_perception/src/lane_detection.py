@@ -10,7 +10,7 @@ from sensor_msgs.msg import Image
 
 def laneDetection_node():
     rospy.init_node('laneDetection', anonymous=False)
-    rospy.Subscriber("image", Image, callback)
+    rospy.Subscriber("/image", Image, callback)
     
     pubState = rospy.Publisher('LanePos',String,queue_size=10)
     
@@ -21,12 +21,14 @@ def laneDetection_node():
         rate.sleep()
 
 def callback(data):
-    bridge = CvBridge()
-    cv_image = bridge.imgmsg_to_cv2(data)
-    testimage=frame_processor(cv_image)
-    cv2.imshow('image', cv_image)
-    pubState = rospy.Publisher('LanePos',Image,queue_size=10)
-    pubState.publish(data=testimage)
+	bridge = CvBridge()
+	cv_image = bridge.imgmsg_to_cv2(data,"bgr8")
+	testimage=frame_processor(cv_image)
+	cv2.imshow('image', testimage)
+	cv2.waitKey(1)
+	#msgimg=bridge.cv2_to_imgmsg(cv_image)
+	#pubState = rospy.Publisher('LanePos',Image,queue_size=10)
+	#pubState.publish(data=testimage)
 
 def frame_processor(image):
 	"""
