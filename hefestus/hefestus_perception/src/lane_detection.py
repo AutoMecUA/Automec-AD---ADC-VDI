@@ -7,6 +7,7 @@ from cv_bridge import CvBridge
 import rospy
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
+import hefestus_perception
 
 def laneDetection_node():
     rospy.init_node('laneDetection', anonymous=False)
@@ -20,7 +21,14 @@ def laneDetection_node():
 def callback(data):
 	bridge = CvBridge()
 	cv_image = bridge.imgmsg_to_cv2(data,"bgr8")
-	testimage=frame_processor(cv_image)
+	middle_line_pos1, middle_line_pos2 = frame_processor(cv_image)
+	offset_px1 = int(middle_line_pos1[0][0]-cv_image.shape[1]/2)
+	offset_px2 = int(middle_line_pos2[0][0]-cv_image.shape[1]/2)
+	offset_pc1 = abs(offset_px1/cv_image.shape[1])
+	offset_pc2 = abs(offset_px2/cv_image.shape[1])
+	slope1 = (middle_line_pos1[0][1]-middle_line_pos1[1][1])/(middle_line_pos1[0][0]-middle_line_pos1[1][0])
+	slope2 = (middle_line_pos2[0][1]-middle_line_pos2[1][1])/(middle_line_pos2[0][0]-middle_line_pos2[1][0])
+	# msg_to_send = 
 
 def frame_processor(image):
 	"""
@@ -46,13 +54,15 @@ def frame_processor(image):
 	# since we are getting too many edges from our image, we apply 
 	# a mask polygon to only focus on the road
 	# Will explain Region selection in detail in further steps
-	region = region_selection(edges)
+	region1, region2 = region_selection(edges)
 	# Applying hough transform to get straight lines from our image 
 	# and find the lane lines
-	hough = hough_transform(region)
+	hough1 = hough_transform(region1)
+	hough2 = hough_transform(region2)
 	#lastly we draw the lines on our resulting frame and return it as output 
-	result = draw_lane_lines(image, lane_lines(image, hough))
-	return result
+	all_lines1 = lane_lines(image, hough1)
+	all_lines2 = lane_lines(image, hough2)
+	return all_lines1[2], all_lines2[2] #only the middle one
 
 def region_selection(image):
 	"""
@@ -62,7 +72,8 @@ def region_selection(image):
 		identified edges in the frame
 	"""
 	# create an array of the same size as of the input image 
-	mask = np.zeros_like(image) 
+	mask_low = np.zeros_like(image)
+	mask_high = np.zeros_like(image) 
 	# if you pass an image with more then one channel
 	if len(image.shape) > 2:
 		channel_count = image.shape[2]
@@ -75,15 +86,20 @@ def region_selection(image):
 	# we have created this polygon in accordance to how the camera was placed
 	rows, cols = image.shape[:2]
 	bottom_left = [cols * 0.1, rows * 0.95]
-	top_left	 = [cols * 0.4, rows * 0.6]
+	middle_left = [cols * 0.25, rows * 0.80]
+	top_left = [cols * 0.4, rows * 0.6]
+	middle_right = [cols * 0.75, rows * 0.80]
 	bottom_right = [cols * 0.9, rows * 0.95]
 	top_right = [cols * 0.6, rows * 0.6]
-	vertices = np.array([[bottom_left, top_left, top_right, bottom_right]], dtype=np.int32)
+	vertices_low = np.array([[bottom_left, middle_left, middle_right, bottom_right]], dtype=np.int32)
+	vertices_high = np.array([[middle_left, top_left, top_right, middle_right]], dtype=np.int32)
 	# filling the polygon with white color and generating the final mask
-	cv2.fillPoly(mask, vertices, ignore_mask_color)
+	cv2.fillPoly(mask_low, vertices_low, ignore_mask_color)
+	cv2.fillPoly(mask_high, vertices_high, ignore_mask_color)
 	# performing Bitwise AND on the input image and mask to get only the edges on the road
-	masked_image = cv2.bitwise_and(image, mask)
-	return masked_image
+	masked_image1 = cv2.bitwise_and(image, mask_low)
+	masked_image2 = cv2.bitwise_and(image, mask_high)
+	return masked_image1, masked_image2
 
 def hough_transform(image):
 	"""
@@ -151,7 +167,8 @@ def lane_lines(image, lines):
 	y2 = y1 * 0.6
 	left_line = pixel_points(y1, y2, left_lane)
 	right_line = pixel_points(y1, y2, right_lane)
-	return left_line, right_line
+	middle_line = ((int((left_line[0][0]+right_line[0][0])/2),int(y1)),(int((left_line[1][0]+right_line[1][0])/2),int(y2)))
+	return left_line, right_line, middle_line
 
 def pixel_points(y1, y2, line):
 	"""
@@ -169,22 +186,6 @@ def pixel_points(y1, y2, line):
 	y1 = int(y1)
 	y2 = int(y2)
 	return ((x1, y1), (x2, y2))
-
-
-def draw_lane_lines(image, lines, color=[255, 0, 0], thickness=12):
-	"""
-	Draw lines onto the input image.
-		Parameters:
-			image: The input test image (video frame in our case).
-			lines: The output lines from Hough Transform.
-			color (Default = red): Line color.
-			thickness (Default = 12): Line thickness. 
-	"""
-	line_image = np.zeros_like(image)
-	for line in lines:
-		if line is not None:
-			cv2.line(line_image, *line, color, thickness)
-	return cv2.addWeighted(image, 1.0, line_image, 1.0, 0.0)
 
 if __name__ == "__main__":
     try:
