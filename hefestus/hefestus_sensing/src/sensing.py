@@ -7,7 +7,7 @@ from sensor_msgs.msg import Image, Imu, LaserScan
 
 
 
-def sensing_node(image):
+def sensing_node():
     bridge = CvBridge()
     pubUlt = rospy.Publisher('obstacle', String, queue_size=10)
     pubImu = rospy.Publisher('state', Imu, queue_size=10)
@@ -16,19 +16,16 @@ def sensing_node(image):
     pubImg = rospy.Publisher('image', Image, queue_size=10)
     rospy.init_node('sensing', anonymous=False)
     rate = rospy.Rate(1) # 10hz
-    ros_image = bridge.cv2_to_imgmsg(image, "bgr8")
     while not rospy.is_shutdown():
         pubUlt.publish()
         pubImu.publish()
         pubDist.publish()
         pubLid.publish()
-        pubImg.publish(ros_image)
+        pubImg.publish()
         rate.sleep()
 
 if __name__ == "__main__":    
-    imagefile="/home/pedro/catkin_ws/src/Automec-AD---ADC-VDI/hefestus/hefestus_sensing/src/lane_example.png"
-    image=cv2.imread(imagefile)
     try:
-        sensing_node(image)
+        sensing_node()
     except rospy.ROSInterruptException:
         pass
