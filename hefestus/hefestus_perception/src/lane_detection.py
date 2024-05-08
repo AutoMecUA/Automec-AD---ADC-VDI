@@ -5,20 +5,20 @@ import numpy as np
 from cv_bridge import CvBridge
 
 import rospy
-from std_msgs.msg import String
 from sensor_msgs.msg import Image
-import hefestus_perception
+from hefestus_perception.msg import MiddleLine
 
 def laneDetection_node():
-    rospy.init_node('laneDetection', anonymous=False)
-    rospy.Subscriber("/image", Image, callback)
-        
-    rate = rospy.Rate(1) # 10hz
+	rospy.init_node('laneDetection', anonymous=False)
+	rospy.Subscriber("/image", Image, callback)
+		
+	rate = rospy.Rate(1) # 10hz
 
-    while not rospy.is_shutdown():
-        rate.sleep()
+	while not rospy.is_shutdown():
+		rate.sleep()
 
-def callback(data):
+def callback(data):	
+	pub = rospy.Publisher("/status/middleLine",MiddleLine,queue_size=10)
 	bridge = CvBridge()
 	cv_image = bridge.imgmsg_to_cv2(data,"bgr8")
 	middle_line_pos1, middle_line_pos2 = frame_processor(cv_image)
@@ -28,7 +28,15 @@ def callback(data):
 	offset_pc2 = abs(offset_px2/cv_image.shape[1])
 	slope1 = (middle_line_pos1[0][1]-middle_line_pos1[1][1])/(middle_line_pos1[0][0]-middle_line_pos1[1][0])
 	slope2 = (middle_line_pos2[0][1]-middle_line_pos2[1][1])/(middle_line_pos2[0][0]-middle_line_pos2[1][0])
-	# msg_to_send = 
+	msg_to_send = MiddleLine()
+	msg_to_send.offset_px_bottom = offset_px1
+	msg_to_send.offset_px_top = offset_px2
+	msg_to_send.offset_pc_bottom = offset_pc1
+	msg_to_send.offset_pc_top = offset_pc2
+	msg_to_send.slope_bottom = slope1
+	msg_to_send.slope_top = slope2
+	pub.publish(msg_to_send)
+
 
 def frame_processor(image):
 	"""

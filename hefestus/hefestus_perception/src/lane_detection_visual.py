@@ -5,7 +5,6 @@ import numpy as np
 from cv_bridge import CvBridge
 
 import rospy
-from std_msgs.msg import String
 from sensor_msgs.msg import Image
 
 def laneDetection_node():
