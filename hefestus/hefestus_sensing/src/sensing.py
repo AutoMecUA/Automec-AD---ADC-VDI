@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-
+import cv2
+from cv_bridge import CvBridge, CvBridgeError
 import rospy
 from std_msgs.msg import String
 from sensor_msgs.msg import Image, Imu, LaserScan 
 
+
+
 def sensing_node():
+    bridge = CvBridge()
     pubUlt = rospy.Publisher('obstacle', String, queue_size=10)
     pubImu = rospy.Publisher('state', Imu, queue_size=10)
     pubDist = rospy.Publisher('distance', String, queue_size=10)
@@ -20,7 +24,7 @@ def sensing_node():
         pubImg.publish()
         rate.sleep()
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     try:
         sensing_node()
     except rospy.ROSInterruptException:
