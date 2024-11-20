@@ -10,7 +10,7 @@ from hefestus_perception.msg import MiddleLine
 
 def laneDetection_node():
 	rospy.init_node('laneDetection', anonymous=False)
-	rospy.Subscriber("/image", Image, callback)
+	rospy.Subscriber("/main_image", Image, callback)
 		
 	rate = rospy.Rate(1) # 10hz
 

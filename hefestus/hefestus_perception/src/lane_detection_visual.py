@@ -9,7 +9,7 @@ from sensor_msgs.msg import Image
 
 def laneDetection_node():
     rospy.init_node('VisualLaneDetection', anonymous=False)
-    rospy.Subscriber("/image", Image, callback)
+    rospy.Subscriber("/main_image", Image, callback)
         
     rate = rospy.Rate(1) # 10hz
 
