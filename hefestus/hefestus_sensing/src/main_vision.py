@@ -1,20 +1,20 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import rospy
 import cv2
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 
 def mainVisionNode():
-    img_Pub = rospy.Publisher('main_image', Image, queue_size=10)
+    img_Pub = rospy.Publisher('main_image', Image, queue_size=1)
     img_bridge = CvBridge()
 
-    cam = cv2.VideoCapture(2)
+    cam = cv2.VideoCapture(6)
 
     if not cam.isOpened():
         rospy.logerr("Camera could not be opened.")
         return
     
-    rate = rospy.Rate(1) # 1hz
+    rate = rospy.Rate(10) # 1hz
     
     try:
         while not rospy.is_shutdown():

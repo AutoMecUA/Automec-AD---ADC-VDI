@@ -1,4 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+PKG = 'hefestus_perception'
+import roslib; roslib.load_manifest(PKG)
 
 import cv2
 import numpy as np
@@ -7,193 +10,162 @@ from cv_bridge import CvBridge
 import rospy
 from sensor_msgs.msg import Image
 from hefestus_perception.msg import MiddleLine
+from rospy.numpy_msg import numpy_msg
+from rospy_tutorials.msg import Floats
+
+image_pub = rospy.Publisher("/status/lane_lines_image", Image, queue_size=10)
+polyfit_pub = rospy.Publisher("/status/lane_polyfit", numpy_msg(Floats), queue_size=10)
 
 def laneDetection_node():
-	rospy.init_node('laneDetection', anonymous=False)
-	rospy.Subscriber("/main_image", Image, callback)
-		
-	rate = rospy.Rate(1) # 10hz
-
-	while not rospy.is_shutdown():
-		rate.sleep()
+    rospy.init_node('laneDetection', anonymous=False)
+    rospy.Subscriber("/main_image", Image, callback)
+        
+    rate = rospy.Rate(10) # 10hz
+    while not rospy.is_shutdown():
+        rate.sleep()
 
 def callback(data):	
-	pub = rospy.Publisher("/status/middleLine",MiddleLine,queue_size=10)
-	bridge = CvBridge()
-	cv_image = bridge.imgmsg_to_cv2(data,"bgr8")
-	middle_line_pos1, middle_line_pos2 = frame_processor(cv_image)
-	offset_px1 = int(middle_line_pos1[0][0]-cv_image.shape[1]/2)
-	offset_px2 = int(middle_line_pos2[0][0]-cv_image.shape[1]/2)
-	offset_pc1 = abs(offset_px1/cv_image.shape[1])
-	offset_pc2 = abs(offset_px2/cv_image.shape[1])
-	slope1 = (middle_line_pos1[0][1]-middle_line_pos1[1][1])/(middle_line_pos1[0][0]-middle_line_pos1[1][0])
-	slope2 = (middle_line_pos2[0][1]-middle_line_pos2[1][1])/(middle_line_pos2[0][0]-middle_line_pos2[1][0])
-	msg_to_send = MiddleLine()
-	msg_to_send.offset_px_bottom = offset_px1
-	msg_to_send.offset_px_top = offset_px2
-	msg_to_send.offset_pc_bottom = offset_pc1
-	msg_to_send.offset_pc_top = offset_pc2
-	msg_to_send.slope_bottom = slope1
-	msg_to_send.slope_top = slope2
-	pub.publish(msg_to_send)
+    bridge = CvBridge()
+    cv_image = bridge.imgmsg_to_cv2(data, "bgr8")
 
+    processed_image, polyfits  = frame_processor(cv_image)
+    msg_to_send = bridge.cv2_to_imgmsg(processed_image, "bgr8")
+    image_pub.publish(msg_to_send)
+
+    if polyfits is not None:
+        polyfit_pub.publish(polyfits)
 
 def frame_processor(image):
-	"""
-	Process the input frame to detect lane lines.
-	Parameters:
-		image: image of a road where one wants to detect lane lines
-		(we will be passing frames of video to this function)
-	"""
-	# convert the RGB image to Gray scale
-	grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-	# applying gaussian Blur which removes noise from the image 
-	# and focuses on our region of interest
-	# size of gaussian kernel
-	kernel_size = 5
-	# Applying gaussian blur to remove noise from the frames
-	blur = cv2.GaussianBlur(grayscale, (kernel_size, kernel_size), 0)
-	# first threshold for the hysteresis procedure
-	low_t = 50
-	# second threshold for the hysteresis procedure 
-	high_t = 150
-	# applying canny edge detection and save edges in a variable
-	edges = cv2.Canny(blur, low_t, high_t)
-	# since we are getting too many edges from our image, we apply 
-	# a mask polygon to only focus on the road
-	# Will explain Region selection in detail in further steps
-	region1, region2 = region_selection(edges)
-	# Applying hough transform to get straight lines from our image 
-	# and find the lane lines
-	hough1 = hough_transform(region1)
-	hough2 = hough_transform(region2)
-	#lastly we draw the lines on our resulting frame and return it as output 
-	all_lines1 = lane_lines(image, hough1)
-	all_lines2 = lane_lines(image, hough2)
-	return all_lines1[2], all_lines2[2] #only the middle one
+    """
+    Process the input frame to detect lane points and then fit a polynomial
+    to the left and right lanes.
+    """
+    # Convert the RGB image to grayscale and invert it (if desired)
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    grayscale = 255 - grayscale
+    
+    # Apply Gaussian Blur to remove noise and focus on our region of interest.
+    kernel_size = 5
+    blur = cv2.GaussianBlur(grayscale, (kernel_size, kernel_size), 0)
+    
+    # Use Canny edge detection
+    low_t = 50
+    high_t = 150
+    edges = cv2.Canny(blur, low_t, high_t)
+    
+    # Apply a mask to focus on the road region.
+    region = region_selection(edges)
+    
+    # Instead of the Hough transform, extract nonzero edge points.
+    left_points, right_points = get_lane_points(region)
+
+    # Fit a polynomial (e.g., quadratic) to each lane's points.
+    left_fit = polyfit_lane(left_points, image.shape[0])
+    right_fit = polyfit_lane(right_points, image.shape[0])
+    
+    middle_fit = compute_middle_lane(left_fit, right_fit)
+
+    polyfits = np.concatenate([
+        middle_fit if middle_fit is not None else [0, 0, 0]
+    ]).astype(np.float32)
+
+    # Draw the polynomial curves onto the image.
+    result = draw_lane_polyfit(image, left_fit, right_fit, middle_fit)
+    
+    return result, polyfits
+
+def compute_middle_lane(left_fit, right_fit):
+    """
+    Compute the middle lane polynomial by averaging the left and right lane fits.
+    """
+    if left_fit is None or right_fit is None:
+        return None  # Middle lane cannot be computed without both lanes
+
+    return (left_fit + right_fit) / 2
 
 def region_selection(image):
-	"""
-	Determine and cut the region of interest in the input image.
-	Parameters:
-		image: we pass here the output from canny where we have 
-		identified edges in the frame
-	"""
-	# create an array of the same size as of the input image 
-	mask_low = np.zeros_like(image)
-	mask_high = np.zeros_like(image) 
-	# if you pass an image with more then one channel
-	if len(image.shape) > 2:
-		channel_count = image.shape[2]
-		ignore_mask_color = (255,) * channel_count
-	# our image only has one channel so it will go under "else"
-	else:
-		# color of the mask polygon (white)
-		ignore_mask_color = 255
-	# creating a polygon to focus only on the road in the picture
-	# we have created this polygon in accordance to how the camera was placed
-	rows, cols = image.shape[:2]
-	bottom_left = [cols * 0.1, rows * 0.95]
-	middle_left = [cols * 0.25, rows * 0.80]
-	top_left = [cols * 0.4, rows * 0.6]
-	middle_right = [cols * 0.75, rows * 0.80]
-	bottom_right = [cols * 0.9, rows * 0.95]
-	top_right = [cols * 0.6, rows * 0.6]
-	vertices_low = np.array([[bottom_left, middle_left, middle_right, bottom_right]], dtype=np.int32)
-	vertices_high = np.array([[middle_left, top_left, top_right, middle_right]], dtype=np.int32)
-	# filling the polygon with white color and generating the final mask
-	cv2.fillPoly(mask_low, vertices_low, ignore_mask_color)
-	cv2.fillPoly(mask_high, vertices_high, ignore_mask_color)
-	# performing Bitwise AND on the input image and mask to get only the edges on the road
-	masked_image1 = cv2.bitwise_and(image, mask_low)
-	masked_image2 = cv2.bitwise_and(image, mask_high)
-	return masked_image1, masked_image2
+    """
+    Determine and cut the region of interest in the input image.
+    """
+    mask = np.zeros_like(image)
+    if len(image.shape) > 2:
+        channel_count = image.shape[2]
+        ignore_mask_color = (255,) * channel_count
+    else:
+        ignore_mask_color = 255
+    rows, cols = image.shape[:2]
+    bottom_left = [cols * 0.1, rows * 0.95]
+    top_left = [cols * 0.4, rows * 0.6]
+    top_right = [cols * 0.6, rows * 0.6]
+    bottom_right = [cols * 0.9, rows * 0.95]
+    vertices = np.array([[bottom_left, top_left, top_right, bottom_right]], dtype=np.int32)
+    cv2.fillPoly(mask, vertices, ignore_mask_color)
+    masked_image = cv2.bitwise_and(image, mask)
+    return masked_image 
 
-def hough_transform(image):
-	"""
-	Determine and cut the region of interest in the input image.
-	Parameter:
-		image: grayscale image which should be an output from the edge detector
-	"""
-	# Distance resolution of the accumulator in pixels.
-	rho = 1			
-	# Angle resolution of the accumulator in radians.
-	theta = np.pi/180
-	# Only lines that are greater than threshold will be returned.
-	threshold = 20	
-	# Line segments shorter than that are rejected.
-	minLineLength = 20
-	# Maximum allowed gap between points on the same line to link them
-	maxLineGap = 500	
-	# function returns an array containing dimensions of straight lines 
-	# appearing in the input image
-	return cv2.HoughLinesP(image, rho = rho, theta = theta, threshold = threshold,
-						minLineLength = minLineLength, maxLineGap = maxLineGap)
+def get_lane_points(edge_image):
+    """
+    Extract (x,y) points from the edge image and split them into left and right lanes
+    based on the image center.
+    """
+    # Find non-zero points in the edge image.
+    pts = cv2.findNonZero(edge_image)
+    left_points = []
+    right_points = []
+    if pts is not None:
+        pts = pts.reshape(-1, 2)
+        mid_x = edge_image.shape[1] // 2  # vertical center of the image
+        for (x, y) in pts:
+            if x < mid_x:
+                left_points.append((x, y))
+            else:
+                right_points.append((x, y))
+    left_points = np.array(left_points) if len(left_points) > 0 else None
+    right_points = np.array(right_points) if len(right_points) > 0 else None
+    return left_points, right_points
 
-def average_slope_intercept(lines):
-	"""
-	Find the slope and intercept of the left and right lanes of each image.
-	Parameters:
-		lines: output from Hough Transform
-	"""
-	left_lines = [] #(slope, intercept)
-	left_weights = [] #(length,)
-	right_lines = [] #(slope, intercept)
-	right_weights = [] #(length,)
-	
-	for line in lines:
-		for x1, y1, x2, y2 in line:
-			if x1 == x2:
-				continue
-			# calculating slope of a line
-			slope = (y2 - y1) / (x2 - x1)
-			# calculating intercept of a line
-			intercept = y1 - (slope * x1)
-			# calculating length of a line
-			length = np.sqrt(((y2 - y1) ** 2) + ((x2 - x1) ** 2))
-			# slope of left lane is negative and for right lane slope is positive
-			if slope < 0:
-				left_lines.append((slope, intercept))
-				left_weights.append((length))
-			else:
-				right_lines.append((slope, intercept))
-				right_weights.append((length))
-	# 
-	left_lane = np.dot(left_weights, left_lines) / np.sum(left_weights) if len(left_weights) > 0 else None
-	right_lane = np.dot(right_weights, right_lines) / np.sum(right_weights) if len(right_weights) > 0 else None
-	return left_lane, right_lane
+def polyfit_lane(points, image_height, poly_order=2):
+    """
+    Fit a polynomial of given order to the lane points.
+    The fit is done in the image coordinate system, with y as the independent variable.
+    Returns polynomial coefficients [a, b, c] such that x = a*y^2 + b*y + c.
+    """
+    if points is None or len(points) < poly_order + 1:
+        return None
+    # Separate the coordinates.
+    xs = points[:, 0]
+    ys = points[:, 1]
+    # Fit polynomial: note we fit x as a function of y.
+    fit = np.polyfit(ys, xs, poly_order)
+    return fit
 
-def lane_lines(image, lines):
-	"""
-	Create full lenght lines from pixel points.
-		Parameters:
-			image: The input test image.
-			lines: The output lines from Hough Transform.
-	"""
-	left_lane, right_lane = average_slope_intercept(lines)
-	y1 = image.shape[0]
-	y2 = y1 * 0.6
-	left_line = pixel_points(y1, y2, left_lane)
-	right_line = pixel_points(y1, y2, right_lane)
-	middle_line = ((int((left_line[0][0]+right_line[0][0])/2),int(y1)),(int((left_line[1][0]+right_line[1][0])/2),int(y2)))
-	return left_line, right_line, middle_line
+def draw_lane_polyfit(image, left_fit, right_fit, middle_fit = None, color_left=(0, 255, 0), color_right=(0, 0, 255), color_middle=(255, 255, 0), thickness=5):
+    """
+    Draw the polynomial curves for left and right lanes onto the image.
+    """
+    overlay = image.copy()
+    y_vals = np.linspace(int(image.shape[0]*0.6), image.shape[0]-1, num=50, dtype=np.int32)
+    
+    # For each lane, calculate corresponding x values from the polynomial.
+    if left_fit is not None:
+        left_points = [(int(np.polyval(left_fit, y)), y) for y in y_vals]
+        for i in range(len(left_points) - 1):
+            cv2.line(overlay, left_points[i], left_points[i + 1], color_left, thickness)
 
-def pixel_points(y1, y2, line):
-	"""
-	Converts the slope and intercept of each line into pixel points.
-		Parameters:
-			y1: y-value of the line's starting point.
-			y2: y-value of the line's end point.
-			line: The slope and intercept of the line.
-	"""
-	if line is None:
-		return None
-	slope, intercept = line
-	x1 = int((y1 - intercept)/slope)
-	x2 = int((y2 - intercept)/slope)
-	y1 = int(y1)
-	y2 = int(y2)
-	return ((x1, y1), (x2, y2))
+    if right_fit is not None:
+        right_points = [(int(np.polyval(right_fit, y)), y) for y in y_vals]
+        for i in range(len(right_points) - 1):
+            cv2.line(overlay, right_points[i], right_points[i + 1], color_right, thickness)    
+    
+    if middle_fit is not None:
+        middle_points = [(int(np.polyval(middle_fit, y)), y) for y in y_vals]
+        for i in range(len(middle_points) - 1):
+            cv2.line(overlay, middle_points[i], middle_points[i + 1], color_middle, thickness)
+
+ 
+    # Combine the overlay with the original image.
+    result = cv2.addWeighted(image, 1.0, overlay, 1.0, 0.0)
+    return result
 
 if __name__ == "__main__":
     try:
