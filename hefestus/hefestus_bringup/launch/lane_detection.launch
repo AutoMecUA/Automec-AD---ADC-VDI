@@ -1,0 +1,4 @@
+<launch>
+    <node pkg="hefestus_sensing" type="main_vision.py" name="main_camera" output="screen"/>
+    <node pkg="hefestus_perception" type="lane_detection.py" name="lane_detection" output="screen"/>
+</launch>
